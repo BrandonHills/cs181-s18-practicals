@@ -188,11 +188,14 @@ def first_last_system_call_feats(tree):
       (in other words, it returns a dictionary indicating what the first and 
       last system calls made by an executable were.)
     """
+    print ("--------------------------------------------NEW TREE --------------------------------------------")
     c = Counter()
     in_all_section = False
     first = True # is this the first system call
     last_call = None # keep track of last call we've seen
     for el in tree.iter():
+        print ("el:", el)
+        print ("el.tag:", el.tag)
         # ignore everything outside the "all_section" element
         if el.tag == "all_section" and not in_all_section:
             in_all_section = True
@@ -228,45 +231,398 @@ def system_call_count_feats(tree):
             c['num_system_calls'] += 1
     return c
 
+
+def NaiveBayesDesignMatrix(direc="train", global_feat_dict=None):
+    ids = []
+    system_calls = dict()
+
+    for datafile in os.listdir(direc):
+        # parse file as an xml document
+        print ("DATAFILE NAME:", datafile)
+        if not datafile == ".DS_Store":
+            tree = ET.parse(os.path.join(direc,datafile))
+            for el in tree.iter():
+            # ignore everything outside the "all_section" element
+                if not el.tag in system_calls.keys():
+                    system_calls[el.tag] = 0
+
+    # Take a dictionary, and for each file, fill it, and then average it.    
+    DesignMatrix = []
+    classes = []
+    for datafile in os.listdir(direc):
+        print ("DATAFILE:", datafile)
+        if not datafile == ".DS_Store":
+
+            ## FOR CLASSES
+            id_str,clazz = datafile.split('.')[:2]
+            ids.append(id_str)
+            try:
+                classes.append(util.malware_classes.index(clazz))
+            except ValueError:
+                assert clazz == "X"
+                classes.append(-1)
+
+            # CREATING DESIGN MATRIX
+            fileDict = system_calls.copy()
+            tree = ET.parse(os.path.join(direc,datafile))
+            for el in tree.iter():
+            # ignore everything outside the "all_section" element
+                if el.tag in fileDict.keys():
+                    fileDict[el.tag] += 1
+                if not el.tag in fileDict.keys():
+                    print ("ERROR, dict doesn't include this KEY")
+
+            # Turn each dictionary into a list and take the average of that list
+            r = []
+            for name in system_calls.keys():
+                r.append(fileDict[name])
+            row = [float(x)/sum(r) for x in r]
+
+            DesignMatrix.append(row)
+
+    return np.asarray(DesignMatrix), np.asarray(classes)
+
+
+def KFolds(X, Y, k_folds, rand):
+    from sklearn.model_selection import RepeatedKFold
+    rkf = RepeatedKFold(n_splits=k_folds, n_repeats=1, random_state=rand)
+
+    X_train, X_test, Y_train, Y_test  = [], [], [], []
+
+    for train, test in rkf.split(X, Y):
+        X_train.append(X[train])
+        Y_train.append(Y[train])
+        X_test.append(X[test])
+        Y_test.append(Y[test])
+
+    return X_train, X_test, Y_train, Y_test
+
+
+def LogRegression(X,Y, FOLDS, rand):
+    import sklearn.linear_model
+    from sklearn.linear_model import LogisticRegression
+    
+    
+    X_train, X_test, Y_train, Y_test = KFolds(X, Y, FOLDS, rand)
+
+    for i in range(FOLDS):
+        LR = LogisticRegression()
+        LR.fit(X_train[i], Y_train[i])
+        print ("iteration", i," ----->", LR.score(X_test[i], Y_test[i]))
+
+
+def BIGRAMS(direc="train", global_feat_dict=None):
+    ids = []
+    system_calls = dict()
+
+    
+    counter = 0
+    den = len(os.listdir(direc))
+    for datafile in os.listdir(direc):
+        # parse file as an xml document
+        # print "DATAFILE NAME:", datafile
+        if not datafile == ".DS_Store":
+            tree = ET.parse(os.path.join(direc,datafile))
+            prior = "start+"
+            for el in tree.iter():
+                name = prior + el.tag
+                if not name in system_calls.keys():
+                    system_calls[name] = 0
+                prior = el.tag + "+"
+        counter += 1
+        if counter % 20 == 0:
+            print (counter/float(den), " complete (1)")
+    
+
+    counter = 0
+    # Take a dictionary, and for each file, fill it, and then average it.    
+    DesignMatrix = []
+    classes = []
+    for datafile in os.listdir(direc):
+        # print "DATAFILE:", datafile
+        if not datafile == ".DS_Store":
+
+            ## FOR CLASSES
+            id_str,clazz = datafile.split('.')[:2]
+            ids.append(id_str)
+            try:
+                classes.append(util.malware_classes.index(clazz))
+            except ValueError:
+                assert clazz == "X"
+                classes.append(-1)
+
+            # CREATING DESIGN MATRIX
+            fileDict = system_calls.copy()
+            tree = ET.parse(os.path.join(direc,datafile))
+            prior = "start+"
+            for el in tree.iter():
+                name = prior + el.tag
+                if name in fileDict.keys():
+                    fileDict[name] += 1
+                if not name in fileDict.keys():
+                    print ("ERROR, dict doesn't include this KEY-NAME")
+                prior = el.tag + "+"
+
+            # Turn each dictionary into a list and take the average of that list
+            r = []
+            for name in system_calls.keys():
+                r.append(fileDict[name])
+            row = [float(x)/sum(r) for x in r]
+
+            DesignMatrix.append(row)
+        counter += 1
+        if counter % 20 == 0:
+            print (counter/float(den), " complete (2)")
+    print ("FINISHED")
+
+    return np.asarray(DesignMatrix), np.asarray(classes)
+
+
+def TRIGRAMS(direc="train", global_feat_dict=None):
+    ids = []
+    system_calls = dict()
+
+    
+    counter = 0
+    den = len(os.listdir(direc))
+    for datafile in os.listdir(direc):
+        # parse file as an xml document
+        # print "DATAFILE NAME:", datafile
+        if not datafile == ".DS_Store":
+            tree = ET.parse(os.path.join(direc,datafile))
+            prior1 = "start1+"
+            prior2 = "start2+"
+            for el in tree.iter():
+                name = prior1 + prior2 + el.tag
+                if not name in system_calls.keys():
+                    system_calls[name] = 0
+                prior1 = prior2
+                prior2 = el.tag + "+"
+
+        counter += 1
+        if counter % 20 == 0:
+            print (counter/float(den), " complete (1)")
+    
+
+    counter = 0
+    # Take a dictionary, and for each file, fill it, and then average it.    
+    DesignMatrix = []
+    classes = []
+    for datafile in os.listdir(direc):
+        # print "DATAFILE:", datafile
+        if not datafile == ".DS_Store":
+
+            ## FOR CLASSES
+            id_str,clazz = datafile.split('.')[:2]
+            ids.append(id_str)
+            try:
+                classes.append(util.malware_classes.index(clazz))
+            except ValueError:
+                assert clazz == "X"
+                classes.append(-1)
+
+            # CREATING DESIGN MATRIX
+            fileDict = system_calls.copy()
+            tree = ET.parse(os.path.join(direc,datafile))
+            prior1 = "start1+"
+            prior2 = "start2+"
+            for el in tree.iter():
+                name = prior1 + prior2 + el.tag
+                if name in fileDict.keys():
+                    fileDict[name] += 1
+                if not name in fileDict.keys():
+                    print ("ERROR, dict doesn't include this KEY-NAME")
+                prior1 = prior2
+                prior2 = el.tag + "+"
+
+            # Turn each dictionary into a list and take the average of that list
+            r = []
+            for name in system_calls.keys():
+                r.append(fileDict[name])
+            row = [float(x)/sum(r) for x in r]
+
+            DesignMatrix.append(row)
+        counter += 1
+        if counter % 20 == 0:
+            print (counter/float(den), " complete (2)")
+    print ("FINISHED")
+
+    return np.asarray(DesignMatrix), np.asarray(classes)
+
+def preprocess_labels(labels, encoder=None, categorical=True):
+    """Encode labels with values among 0 and `n-classes-1`"""
+    from sklearn.preprocessing import LabelEncoder 
+    from keras.utils import np_utils
+    if not encoder:
+        encoder = LabelEncoder()
+        encoder.fit(labels)
+    y = encoder.transform(labels).astype(np.int32)
+    if categorical:
+        y = np_utils.to_categorical(y)
+    return y, encoder
+
+def preprocess_data(X, scaler=None):
+    from sklearn.preprocessing import StandardScaler
+    """Preprocess input data by standardise features 
+    by removing the mean and scaling to unit variance"""
+    if not scaler:
+        scaler = StandardScaler()
+        scaler.fit(X)
+    X = scaler.transform(X)
+    return X, scaler
+
+
+def CNN(X, Y, FOLDS, rand):
+    import numpy as np
+    import pandas as pd
+    import theano
+    import theano.tensor as T
+
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.preprocessing import LabelEncoder 
+
+    import keras 
+    from keras.utils import np_utils
+    from sklearn.cross_validation import train_test_split
+    from keras.callbacks import EarlyStopping, ModelCheckpoint
+    from keras.models import Sequential
+    from keras.layers import Dense, Activation
+
+    X, labels = X, Y
+    X, scaler = preprocess_data(X)
+    Y, encoder = preprocess_labels(labels)
+
+
+    dims = X.shape[1] #number of features in our data  - 22
+    print(dims, 'dims')
+    print("Building model...")
+
+    nb_classes = Y.shape[1] #number of classes in our data - 2
+    print(nb_classes, 'classes')
+
+
+    # CROSS-VALIDATION
+    X_train, X_test, Y_train, Y_test = KFolds(X, Y, FOLDS, rand)
+
+    pred_list = []
+    for i in range(FOLDS):
+        model = Sequential() #intialize a model. This creates a new model.
+        model.add(Dense(30, input_shape=(dims,)))
+        # model.add(Dense(15))
+        # model.add(Dense(5))
+        model.add(Dense(nb_classes))
+        model.add(Activation('softmax')) #add softmax activation
+        model.compile(optimizer='sgd', loss='categorical_crossentropy')
+        
+        X_t, X_val, Y_t, Y_val = train_test_split(X_train[i], Y_train[i], test_size=0.15, random_state=4)
+        model.fit(X_t, Y_t, validation_data = (X_val, Y_val), nb_epoch=50, 
+              batch_size=20, verbose=True, validation_split=0.15)
+
+        pred_list.append(model.predict(X_test[i]).argmax(axis=1))
+    
+    for i in range(FOLDS):
+        test_predictions = pred_list[i]
+        print('test accuracy is {0}'.format(sum(Y_test[i].argmax(axis=1)==test_predictions)/test_predictions.shape[0]))
+
+
+
 ## The following function does the feature extraction, learning, and prediction
 def main():
+    import numpy as np
+    import copy
+    
     train_dir = "train"
     test_dir = "test"
-    outputfile = "sample_predictions.csv"  # feel free to change this or take it as an argument
+    outputfile = "sample_predictions_trial1.csv"  # feel free to change this or take it as an argument
     
     # TODO put the names of the feature functions you've defined above in this list
     ffs = [first_last_system_call_feats, system_call_count_feats]
     
-    # extract features
-    print "extracting training features..."
-    X_train,global_feat_dict,t_train,train_ids = extract_feats(ffs, train_dir)
-    print "done extracting training features"
-    print
+    # extract features0
+    # print "extracting training features..."
+    # X_train,global_feat_dict,t_train,train_ids = extract_feats(ffs, train_dir)
+    # print "done extracting training features"
+
+    # Visualizing Features
+    # print "X_train"
+    # print X_train.shape
+    # print X_train
+    # print "t_train", t_train
+    # print "global_feat_dict", global_feat_dict
+    # print "train_ids", train_ids
     
-    # TODO train here, and learn your classification parameters
-    print "learning..."
-    learned_W = np.random.random((len(global_feat_dict),len(util.malware_classes)))
-    print "done learning"
-    print
+    # CREATING THE DATA FOR LOGISTIC REGRESSION ------> SAVED IN PICKLE "DesignMatrix2"
+    # DM, y = NaiveBayesDesignMatrix(train_dir)
+    # np.save("DesignMatrix2", DM, allow_pickle = True)
+    # np.save("Classes_train", y, allow_pickle = True)
+
+    # # CREATING THE DATA FOR BIGRAMS ----> SAVED IN PICKLE "BIGram_DesignMatrix"
+    # DM, y = BIGRAMS(train_dir)
+    # np.save("BIGram_DesignMatrix", DM, allow_pickle = True)
+    # np.save("BIGram_Classes_train", y, allow_pickle = True)
+
+
+    # RUNNING LOGISTIC REGRESSION ON Naive Bayes Approach
+    # DM = np.load("DesignMatrix2.npy")
+    # print("DM.shape:", DM.shape)
+    # y = np.load("Classes_train.npy")
+
+    # LogRegression(DM, y, 5, 0)
+
+    # RUNNING LOGISTIC REGRESSION ON BIGrams Approach
+    # DM = np.load("BIGram_DesignMatrix.npy")
+    # print("DM.shape:", DM.shape)
+    # y = np.load("BIGram_Classes_train.npy")
+    # LogRegression(DM, y, 5, 10)
+
+    DM = np.load("BIGram_DesignMatrix.npy")
+    print("DM.shape:", DM.shape)
+    y = np.load("BIGram_Classes_train.npy")
+    CNN(DM, y, 5, 0)
+
+
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+
+    # # TODO train here, and learn your classification parameters
+    # print "learning..."
+    # learned_W = np.random.random((len(global_feat_dict),len(util.malware_classes)))
+    # print "done learning..."
     
-    # get rid of training data and load test data
-    del X_train
-    del t_train
-    del train_ids
-    print "extracting test features..."
-    X_test,_,t_ignore,test_ids = extract_feats(ffs, test_dir, global_feat_dict=global_feat_dict)
-    print "done extracting test features"
-    print
+
+
+
+    # # get rid of training data and load test data
+    # del X_train
+    # del t_train
+    # del train_ids
+    # print "extracting test features..."
+    # X_test,_,t_ignore,test_ids = extract_feats(ffs, test_dir, global_feat_dict=global_feat_dict)
+    # print "done extracting test features"
+    # print
     
-    # TODO make predictions on text data and write them out
-    print "making predictions..."
-    preds = np.argmax(X_test.dot(learned_W),axis=1)
-    print "done making predictions"
-    print
+    # # TODO make predictions on text data and write them out
+    # print "making predictions..."
+    # preds = np.argmax(X_test.dot(learned_W),axis=1)
+    # print "done making predictions"
+    # print
     
-    print "writing predictions..."
-    util.write_predictions(preds, test_ids, outputfile)
-    print "done!"
+    # print "writing predictions..."
+    # util.write_predictions(preds, test_ids, outputfile)
+    # print "done!"
 
 if __name__ == "__main__":
     main()
